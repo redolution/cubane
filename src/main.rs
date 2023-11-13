@@ -12,15 +12,19 @@ use panic_probe as _;
 
 // Provide an alias for our BSP so we can switch targets quickly.
 // Uncomment the BSP you included in Cargo.toml, the rest of the code does not need to change.
-use rp_pico as bsp;
+pub(crate) use rp_pico as bsp;
 // use sparkfun_pro_micro_rp2040 as bsp;
 
 use bsp::hal::{
     clocks::{init_clocks_and_plls, Clock},
+    gpio::{FunctionPio0, Pin},
     pac,
+    pio::PIOExt,
     sio::Sio,
     watchdog::Watchdog,
 };
+
+mod exi;
 
 #[entry]
 fn main() -> ! {
@@ -59,6 +63,15 @@ fn main() -> ! {
     // a Pico W and want to toggle a LED with a simple GPIO output pin, you can connect an external
     // LED to one of the GPIO pins, and reference that pin here.
     let mut led_pin = pins.led.into_push_pull_output();
+
+    let cs_pin: Pin<_, FunctionPio0, _> = pins.gpio4.into_function();
+    let cs_pin_id = cs_pin.id().num;
+    let clk_pin: Pin<_, FunctionPio0, _> = pins.gpio5.into_function();
+    let clk_pin_id = clk_pin.id().num;
+    let di_pin: Pin<_, FunctionPio0, _> = pins.gpio6.into_function();
+    let di_pin_id = di_pin.id().num;
+    let (mut pio0, pio0_sm0, _, _, _) = pac.PIO0.split(&mut pac.RESETS);
+    exi::install_di_driver(&mut pio0, pio0_sm0, cs_pin_id, clk_pin_id, di_pin_id);
 
     loop {
         info!("on!");
