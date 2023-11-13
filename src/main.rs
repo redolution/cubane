@@ -17,6 +17,7 @@ pub(crate) use rp_pico as bsp;
 
 use bsp::hal::{
     clocks::{init_clocks_and_plls, Clock},
+    dma::DMAExt,
     gpio::{FunctionPio0, Pin},
     pac,
     pio::PIOExt,
@@ -25,6 +26,7 @@ use bsp::hal::{
 };
 
 mod exi;
+mod logic_analyzer;
 
 #[entry]
 fn main() -> ! {
@@ -72,6 +74,10 @@ fn main() -> ! {
     let di_pin_id = di_pin.id().num;
     let (mut pio0, pio0_sm0, _, _, _) = pac.PIO0.split(&mut pac.RESETS);
     exi::install_di_driver(&mut pio0, pio0_sm0, cs_pin_id, clk_pin_id, di_pin_id);
+
+    let (mut pio1, pio1_sm0, _, _, _) = pac.PIO1.split(&mut pac.RESETS);
+    let dma = pac.DMA.split(&mut pac.RESETS);
+    logic_analyzer::capture_trace(&mut pio1, pio1_sm0, dma.ch0);
 
     loop {
         info!("on!");
