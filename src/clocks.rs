@@ -1,10 +1,14 @@
 //! Clock tree configuration
 
-use fugit::{HertzU32, RateExtU32};
-
 use crate::bsp::{
     self,
-    hal::{clocks, pac, pll, watchdog::Watchdog, xosc},
+    hal::{
+        clocks,
+        fugit::{HertzU32, RateExtU32},
+        pac, pll,
+        watchdog::Watchdog,
+        xosc,
+    },
 };
 
 // Portability: the PLL configurations assume that the board has a 12MHz crystal
