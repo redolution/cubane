@@ -36,34 +36,36 @@
 //! In the worst case, this leaves about 2 cycles (10ns) of headroom,
 //! which exceeds the 8.93ns setup time specified by the Flipper datasheet.
 
-use crate::bsp::hal::pio;
+use crate::bsp::hal::{dma, pio};
 
-pub(crate) fn install_di_driver<P, SMI>(
+pub(crate) fn install_di_driver<P, SMI, CH>(
     pio: &mut pio::PIO<P>,
     sm: pio::UninitStateMachine<(P, SMI)>,
     cs_pin_id: u8,
     clk_pin_id: u8,
     di_pin_id: u8,
+    dma_chan: CH,
 ) where
     P: pio::PIOExt,
     SMI: pio::StateMachineIndex,
+    CH: dma::SingleChannel,
 {
     let program = pio_proc::pio_asm!(
+        "pull",
         "wait 1 gpio 4",
         "wait 0 gpio 4",
         ".wrap_target",
-        "set pins, 0",
-        "wait 0 gpio 5",
-        "wait 1 gpio 5",
-        "set pins, 1",
+        "out pins, 1",
+        "pull ifempty noblock",
         "wait 0 gpio 5",
         "wait 1 gpio 5",
         ".wrap",
     );
 
     let installed = pio.install(&program.program).unwrap();
-    let (mut sm, _, _) = pio::PIOBuilder::from_program(installed)
+    let (mut sm, _, mut tx) = pio::PIOBuilder::from_program(installed)
         .set_pins(di_pin_id, 1)
+        .out_pins(di_pin_id, 1)
         .in_pin_base(cs_pin_id)
         .build(sm);
     sm.set_pindirs([
@@ -72,4 +74,11 @@ pub(crate) fn install_di_driver<P, SMI>(
         (di_pin_id, pio::PinDir::Output),
     ]);
     sm.start();
+
+    tx.write(0); // Dummy word for the command/address
+    let block = &crate::IPL_PAYLOAD[..256];
+    let (_, block, _) = unsafe { block.align_to::<u32>() };
+    let mut config = dma::single_buffer::Config::new(dma_chan, block, tx);
+    config.bswap(true);
+    let _transfer = config.start();
 }
