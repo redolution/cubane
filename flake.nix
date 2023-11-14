@@ -50,7 +50,8 @@
               }: mkShell {
                 name = "cubane";
                 nativeBuildInputs = [
-                  (rust-bin.stable.latest.default.override {
+                  # RTIC 2.0 currently requires nightly
+                  (rust-bin.nightly.latest.default.override {
                     extensions = [
                       "rust-analyzer"
                       "rust-src"
