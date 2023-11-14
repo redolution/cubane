@@ -27,7 +27,7 @@ pub(crate) fn capture_trace<P, SMI, CH>(
         // 3: DO
         // 4: CS
         // 5: CLK
-        // 6-7: DI
+        // 6: DI
         .in_pin_base(3)
         .autopull(true)
         .autopush(true)

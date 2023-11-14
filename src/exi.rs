@@ -22,12 +22,10 @@
 //! RTC-DOL shifts bits out shortly after the rising edge of the bus clock.
 //! The data only decodes correctly when setting the protocol decoder to SPI mode 0.
 //!
-//! We have a few reasons for using PIO:
-//! - we need parallel output to multiple pins, in order to outdrive RTC-DOL;
-//! - the hardware SPI block in the RP2040 is too slow:
-//!   section *4.4.3.4. Clock ratios* of the datasheet
-//!   says *SYSCLK* needs to be at least 12 times faster than the bus clock, which would be 324MHz;
-//!   RP2040 overclocks very well, but that is too high for comfort.
+//! We have to use PIO, because the hardware SPI block in the RP2040 is too slow:
+//! section *4.4.3.4. Clock ratios* of the datasheet
+//! says *SYSCLK* needs to be at least 12 times faster than the bus clock, which would be 324MHz;
+//! RP2040 overclocks very well, but that is too high for comfort.
 //!
 //! Lastly, this module requires overclocking the microcontroller to meet DI (MISO) timings.  
 //! The simplest PIO program to detect an edge on an input and toggle a GPIO takes 4-5 cycles to
