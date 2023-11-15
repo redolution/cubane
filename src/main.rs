@@ -10,19 +10,12 @@ mod clocks;
 mod exi;
 mod logic_analyzer;
 
-#[repr(C)] // guarantee 'bytes' comes after '_align'
-struct AlignedTo<Align, Bytes: ?Sized> {
-    _align: [Align; 0],
-    bytes: Bytes, 
+extern "C" {
+    /// The BS2 payload section in flash
+    ///
+    /// The bottom 512KiB of the 2MiB flash are reserved for firmware.
+    static _payload: [u32; (2048 - 512) * 1024 / core::mem::size_of::<u32>()];
 }
-
-// dummy static used to create aligned data
-static ALIGNED: &'static AlignedTo<f32, [u8]> = &AlignedTo {
-    _align: [],
-    bytes: *include_bytes!("../iplboot.vgc"),
-};
-
-static IPL_PAYLOAD: &'static [u8] = &ALIGNED.bytes;
 
 #[rtic::app(
     device = crate::bsp::pac,

@@ -76,9 +76,9 @@ pub(crate) fn install_di_driver<P, SMI, CH>(
     sm.start();
 
     tx.write(0); // Dummy word for the command/address
-    let block = &crate::IPL_PAYLOAD[..256];
-    let (_, block, _) = unsafe { block.align_to::<u32>() };
-    let mut config = dma::single_buffer::Config::new(dma_chan, block, tx);
+    let payload = unsafe { &crate::_payload[..256 / 4] };
+    defmt::debug!("{:x}", payload);
+    let mut config = dma::single_buffer::Config::new(dma_chan, payload, tx);
     config.bswap(true);
     let _transfer = config.start();
 }
