@@ -75,10 +75,17 @@ pub(crate) fn install_di_driver<P, SMI, CH>(
     ]);
     sm.start();
 
+    let payload = unsafe { &crate::_payload };
+    assert_eq!(u32::from_be(payload[0]), 0x49504C42); // "IPLB"
+    assert_eq!(u32::from_be(payload[1]), 0x4F4F5420); // "OOT "
+    let size = u32::from_be(payload[2]) as usize / core::mem::size_of_val(&payload[0]);
+    assert!(size <= payload.len());
+    let payload = &payload[..size];
+    assert_eq!(u32::from_be(payload[size - 1]), 0x5049434F); // "PICO"
+
+    let block = &payload[..256 / 4];
     tx.write(0); // Dummy word for the command/address
-    let payload = unsafe { &crate::_payload[..256 / 4] };
-    defmt::debug!("{:x}", payload);
-    let mut config = dma::single_buffer::Config::new(dma_chan, payload, tx);
+    let mut config = dma::single_buffer::Config::new(dma_chan, block, tx);
     config.bswap(true);
     let _transfer = config.start();
 }
