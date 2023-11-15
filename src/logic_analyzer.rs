@@ -1,6 +1,5 @@
 //! Simple "logic analyzer" for debugging
 use cortex_m::singleton;
-use defmt::*;
 
 use crate::bsp::hal::{dma, pio};
 
@@ -40,5 +39,5 @@ pub(crate) fn capture_trace<P, SMI, CH>(
     let transfer = config.start();
     let (_, _, buf) = transfer.wait();
     let (_, buf, _) = unsafe { buf.align_to::<u8>() };
-    debug!("{}", buf);
+    defmt::debug!("{}", buf);
 }

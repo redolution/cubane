@@ -29,8 +29,6 @@ static IPL_PAYLOAD: &'static [u8] = &ALIGNED.bytes;
     dispatchers = [TIMER_IRQ_1],
 )]
 mod app {
-    use defmt::*;
-
     use crate::bsp::{
         self,
         hal::{
@@ -51,7 +49,7 @@ mod app {
 
     #[init]
     fn init(mut ctx: init::Context) -> (Shared, Local) {
-        info!("Program start");
+        defmt::info!("Program start");
         let mut watchdog = Watchdog::new(ctx.device.WATCHDOG);
         let sio = Sio::new(ctx.device.SIO);
 
