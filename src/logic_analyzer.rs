@@ -3,6 +3,7 @@ use cortex_m::singleton;
 
 use crate::bsp::hal::{dma, pio};
 
+#[allow(dead_code)]
 pub(crate) fn capture_trace<P, SMI, CH>(
     pio: &mut pio::PIO<P>,
     sm: pio::UninitStateMachine<(P, SMI)>,

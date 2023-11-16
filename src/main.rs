@@ -32,7 +32,7 @@ mod app {
             watchdog::Watchdog,
         },
     };
-    use crate::{clocks, exi, logic_analyzer};
+    use crate::{clocks, exi};
 
     #[shared]
     struct Shared {}
@@ -76,9 +76,6 @@ mod app {
         exi::install_di_driver(
             &mut pio0, pio0_sm0, cs_pin_id, clk_pin_id, di_pin_id, dma.ch0,
         );
-
-        let (mut pio1, pio1_sm0, _, _, _) = ctx.device.PIO1.split(&mut ctx.device.RESETS);
-        logic_analyzer::capture_trace(&mut pio1, pio1_sm0, dma.ch1);
 
         (Shared {}, Local {})
     }
