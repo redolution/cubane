@@ -51,22 +51,19 @@ pub(crate) fn install_di_driver<P, SMI, CH>(
     CH: dma::SingleChannel,
 {
     let program = pio_proc::pio_asm!(
-        "pull",
-        "wait 1 gpio 4",
-        "wait 0 gpio 4",
         ".wrap_target",
         "out pins, 1",
-        "pull ifempty noblock",
         "wait 0 gpio 5",
         "wait 1 gpio 5",
         ".wrap",
     );
 
     let installed = pio.install(&program.program).unwrap();
-    let (mut sm, _, mut tx) = pio::PIOBuilder::from_program(installed)
+    let (mut sm, _, tx) = pio::PIOBuilder::from_program(installed)
         .set_pins(di_pin_id, 1)
         .out_pins(di_pin_id, 1)
         .in_pin_base(cs_pin_id)
+        .autopull(true)
         .build(sm);
     sm.set_pindirs([
         (cs_pin_id, pio::PinDir::Input),
@@ -84,8 +81,13 @@ pub(crate) fn install_di_driver<P, SMI, CH>(
     assert_eq!(u32::from_be(payload[size - 1]), 0x5049434F); // "PICO"
 
     let block = &payload[..256 / 4];
-    tx.write(0); // Dummy word for the command/address
-    let mut config = dma::single_buffer::Config::new(dma_chan, block, tx);
-    config.bswap(true);
-    let _transfer = config.start();
+    let (mut dma_chan, mut tx) = (dma_chan, tx);
+    loop {
+        while tx.is_full() {}
+        tx.write(0); // Dummy word for the command/address
+        let mut config = dma::single_buffer::Config::new(dma_chan, block, tx);
+        config.bswap(true);
+        let transfer = config.start();
+        (dma_chan, _, tx) = transfer.wait();
+    }
 }
