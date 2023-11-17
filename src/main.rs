@@ -24,13 +24,7 @@ extern "C" {
 mod app {
     use crate::bsp::{
         self,
-        hal::{
-            dma::DMAExt,
-            gpio::{FunctionPio0, Pin},
-            pio::PIOExt,
-            sio::Sio,
-            watchdog::Watchdog,
-        },
+        hal::{dma::DMAExt, pio::PIOExt, sio::Sio, watchdog::Watchdog},
     };
     use crate::{clocks, exi};
 
@@ -66,15 +60,12 @@ mod app {
 
         let dma = ctx.device.DMA.split(&mut ctx.device.RESETS);
 
-        let cs_pin: Pin<_, FunctionPio0, _> = pins.gpio4.into_function();
-        let cs_pin_id = cs_pin.id().num;
-        let clk_pin: Pin<_, FunctionPio0, _> = pins.gpio5.into_function();
-        let clk_pin_id = clk_pin.id().num;
-        let di_pin: Pin<_, FunctionPio0, _> = pins.gpio6.into_function();
-        let di_pin_id = di_pin.id().num;
-        let (mut pio0, pio0_sm0, _, _, _) = ctx.device.PIO0.split(&mut ctx.device.RESETS);
-        exi::install_di_driver(
-            &mut pio0, pio0_sm0, cs_pin_id, clk_pin_id, di_pin_id, dma.ch0,
+        let (mut pio0, pio0_sm0, pio0_sm1, pio0_sm2, _) =
+            ctx.device.PIO0.split(&mut ctx.device.RESETS);
+
+        let exi = exi::EXI::new(
+            &mut pio0, pio0_sm0, pio0_sm1, pio0_sm2, pins.gpio4, pins.gpio5, pins.gpio3,
+            pins.gpio6, dma.ch0,
         );
 
         (Shared {}, Local {})
