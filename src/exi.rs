@@ -185,6 +185,9 @@ where
     }
 }
 
+/// The CS monitor state machine
+///
+/// Responsible for disabling the DI output and providing an interrupt when CS is deasserted.
 fn init_sm_cs<P, SMI, PinCs, PinDi>(
     pio: &mut pio::PIO<P>,
     sm: pio::UninitStateMachine<(P, SMI)>,
@@ -230,6 +233,7 @@ where
     PIOStateMachine { sm, rx, tx }
 }
 
+/// The RX state machine
 fn init_sm_rx<P, SMI, PinCs, PinClk, PinDo>(
     pio: &mut pio::PIO<P>,
     sm: pio::UninitStateMachine<(P, SMI)>,
@@ -272,6 +276,7 @@ where
     PIOStateMachine { sm, rx, tx }
 }
 
+/// The TX state machine
 fn init_sm_tx<P, SMI, PinClk, PinDi>(
     pio: &mut pio::PIO<P>,
     sm: pio::UninitStateMachine<(P, SMI)>,
