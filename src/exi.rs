@@ -79,6 +79,7 @@ where
     /// Initialize EXI with all the resources it requires
     pub(crate) fn new<PinCs, PinClk, PinDo, PinDi>(
         pio: &mut pio::PIO<P>,
+        irq_cs: u8,
         sm_cs: pio::UninitStateMachine<(P, CS)>,
         sm_rx: pio::UninitStateMachine<(P, RX)>,
         sm_tx: pio::UninitStateMachine<(P, TX)>,
@@ -110,8 +111,8 @@ where
         // Required to outdrive RTC-DOL
         pin_di.set_drive_strength(gpio::OutputDriveStrength::EightMilliAmps);
 
-        let sm_cs = init_sm_cs(pio, sm_cs, &pin_cs);
-        let sm_rx = init_sm_rx(pio, sm_rx, &pin_clk, &pin_do);
+        let sm_cs = init_sm_cs(pio, sm_cs, irq_cs, &pin_cs, &pin_di);
+        let sm_rx = init_sm_rx(pio, sm_rx, &pin_cs, &pin_clk, &pin_do);
         let sm_tx = init_sm_tx(pio, sm_tx, &pin_clk, &pin_di);
 
         Self {
@@ -123,49 +124,66 @@ where
     }
 }
 
-fn init_sm_cs<P, SMI, PinCs>(
+fn init_sm_cs<P, SMI, PinCs, PinDi>(
     pio: &mut pio::PIO<P>,
     sm: pio::UninitStateMachine<(P, SMI)>,
+    irq_cs: u8,
     pin_cs: &PinCs,
+    pin_di: &PinDi,
 ) -> PIOStateMachine<P, SMI>
 where
     P: pio::PIOExt,
     SMI: pio::StateMachineIndex,
     PinCs: gpio::AnyPin<Function = P::PinFunction>,
+    PinDi: gpio::AnyPin<Function = P::PinFunction>,
 {
     let pin_cs = pin_cs.borrow().id().num;
+    let pin_di = pin_di.borrow().id().num;
 
     let mut a = ::pio::Assembler::<{ ::pio::RP2040_MAX_PROGRAM_SIZE }>::new();
     let mut wrap_source = a.label();
     let mut wrap_target = a.label();
+    let mut cs_high = a.label();
     {
         use ::pio::*;
+        a.jmp(JmpCondition::PinHigh, &mut cs_high);
+
         a.bind(&mut wrap_target);
-        a.nop();
+        a.wait(0, WaitSource::GPIO, pin_cs, false);
+
+        a.wait(1, WaitSource::GPIO, pin_cs, false);
+        a.bind(&mut cs_high);
+        a.irq(false, false, irq_cs, false);
+        a.set(SetDestination::PINDIRS, 0);
         a.bind(&mut wrap_source);
     }
     let program = a.assemble_with_wrap(wrap_source, wrap_target);
 
     let installed = pio.install(&program).unwrap();
     let (sm, rx, tx) = pio::PIOBuilder::from_program(installed)
+        .jmp_pin(pin_cs)
+        .set_pins(pin_di, 1)
         .build(sm);
     let sm = sm.start();
 
     PIOStateMachine { sm, rx, tx }
 }
 
-fn init_sm_rx<P, SMI, PinClk, PinDo>(
+fn init_sm_rx<P, SMI, PinCs, PinClk, PinDo>(
     pio: &mut pio::PIO<P>,
     sm: pio::UninitStateMachine<(P, SMI)>,
+    pin_cs: &PinCs,
     pin_clk: &PinClk,
     pin_do: &PinDo,
 ) -> PIOStateMachine<P, SMI>
 where
     P: pio::PIOExt,
     SMI: pio::StateMachineIndex,
+    PinCs: gpio::AnyPin<Function = P::PinFunction>,
     PinClk: gpio::AnyPin<Function = P::PinFunction>,
     PinDo: gpio::AnyPin<Function = P::PinFunction>,
 {
+    let pin_cs = pin_cs.borrow().id().num;
     let pin_clk = pin_clk.borrow().id().num;
     let pin_do = pin_do.borrow().id().num;
 
@@ -175,13 +193,18 @@ where
     {
         use ::pio::*;
         a.bind(&mut wrap_target);
-        a.nop();
+        a.wait(0, WaitSource::GPIO, pin_cs, false);
+        a.wait(0, WaitSource::GPIO, pin_clk, false);
+        a.wait(1, WaitSource::GPIO, pin_clk, false);
+        a.r#in(InSource::PINS, 1);
         a.bind(&mut wrap_source);
     }
     let program = a.assemble_with_wrap(wrap_source, wrap_target);
 
     let installed = pio.install(&program).unwrap();
     let (sm, rx, tx) = pio::PIOBuilder::from_program(installed)
+        .in_pin_base(pin_do)
+        .autopush(true)
         .build(sm);
     let sm = sm.start();
 

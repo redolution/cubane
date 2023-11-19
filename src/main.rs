@@ -24,15 +24,25 @@ extern "C" {
 mod app {
     use crate::bsp::{
         self,
-        hal::{dma::DMAExt, pio::PIOExt, sio::Sio, watchdog::Watchdog},
+        hal::{
+            dma::{self, DMAExt},
+            pio::{self, PIOExt},
+            sio::Sio,
+            watchdog::Watchdog,
+        },
+        pac,
     };
     use crate::{clocks, exi};
 
     #[shared]
-    struct Shared {}
+    struct Shared {
+        pio0: pio::PIO<pac::PIO0>,
+    }
 
     #[local]
-    struct Local {}
+    struct Local {
+        exi: exi::EXI<pac::PIO0, pio::SM0, pio::SM1, pio::SM2, dma::CH0>,
+    }
 
     #[init]
     fn init(mut ctx: init::Context) -> (Shared, Local) {
@@ -63,11 +73,24 @@ mod app {
         let (mut pio0, pio0_sm0, pio0_sm1, pio0_sm2, _) =
             ctx.device.PIO0.split(&mut ctx.device.RESETS);
 
+        let irq_cs = 0;
         let exi = exi::EXI::new(
-            &mut pio0, pio0_sm0, pio0_sm1, pio0_sm2, pins.gpio4, pins.gpio5, pins.gpio3,
+            &mut pio0, irq_cs, pio0_sm0, pio0_sm1, pio0_sm2, pins.gpio4, pins.gpio5, pins.gpio3,
             pins.gpio6, dma.ch0,
         );
+        pio0.irq0().enable_sm_interrupt(irq_cs);
 
-        (Shared {}, Local {})
+        root::spawn().unwrap();
+
+        (Shared { pio0 }, Local { exi })
+    }
+
+    #[task(local = [exi])]
+    async fn root(_ctx: root::Context) {
+    }
+
+    #[task(binds = PIO0_IRQ_0, shared = [&pio0])]
+    fn pio0_irq0(ctx: pio0_irq0::Context) {
+        ctx.shared.pio0.clear_irq(1 << 0);
     }
 }
