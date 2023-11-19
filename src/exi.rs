@@ -36,6 +36,10 @@
 //! In the worst case, this leaves about 2 cycles (10ns) of headroom,
 //! which exceeds the 8.93ns setup time specified by the Flipper datasheet.
 
+use core::{marker, task};
+
+use futures_util::future;
+
 use crate::bsp::hal::{dma, gpio, pio};
 
 /// Simple container type for a PIO state machine and its FIFOs
@@ -52,6 +56,8 @@ pub(crate) struct EXI<
     RX: pio::StateMachineIndex,
     TX: pio::StateMachineIndex,
     CHI: dma::ChannelIndex,
+    PioIRQ: pio::IRQIndex,
+    const CS_IRQ: u8,
 > {
     /// The chip-select monitor
     ///
@@ -66,9 +72,18 @@ pub(crate) struct EXI<
 
     /// A single DMA channel ought to be enough for anybody
     dma: Option<dma::Channel<CHI>>,
+
+    _pio_irq: marker::PhantomData<PioIRQ>,
 }
 
-impl<P, CS, RX, TX, CHI> EXI<P, CS, RX, TX, CHI>
+/// ZST to encapsulate the ISR implementation
+pub(crate) struct EXIIntHandler<P: pio::PIOExt, PioIRQ: pio::IRQIndex, const CS_IRQ: u8> {
+    _pio: marker::PhantomData<P>,
+    _pio_irq: marker::PhantomData<PioIRQ>,
+}
+
+impl<P, CS, RX, TX, CHI, PioIRQ: pio::IRQIndex, const CS_IRQ: u8>
+    EXI<P, CS, RX, TX, CHI, PioIRQ, CS_IRQ>
 where
     P: pio::PIOExt,
     CS: pio::StateMachineIndex,
@@ -79,7 +94,6 @@ where
     /// Initialize EXI with all the resources it requires
     pub(crate) fn new<PinCs, PinClk, PinDo, PinDi>(
         pio: &mut pio::PIO<P>,
-        irq_cs: u8,
         sm_cs: pio::UninitStateMachine<(P, CS)>,
         sm_rx: pio::UninitStateMachine<(P, RX)>,
         sm_tx: pio::UninitStateMachine<(P, TX)>,
@@ -90,7 +104,7 @@ where
         pin_di: PinDi,
 
         dma: dma::Channel<CHI>,
-    ) -> Self
+    ) -> (Self, EXIIntHandler<P, PioIRQ, CS_IRQ>)
     where
         PinCs: gpio::AnyPin,
         PinCs::Id: gpio::ValidFunction<P::PinFunction>,
@@ -111,15 +125,62 @@ where
         // Required to outdrive RTC-DOL
         pin_di.set_drive_strength(gpio::OutputDriveStrength::EightMilliAmps);
 
-        let sm_cs = init_sm_cs(pio, sm_cs, irq_cs, &pin_cs, &pin_di);
+        let sm_cs = init_sm_cs(pio, sm_cs, CS_IRQ, &pin_cs, &pin_di);
         let sm_rx = init_sm_rx(pio, sm_rx, &pin_cs, &pin_clk, &pin_do);
         let sm_tx = init_sm_tx(pio, sm_tx, &pin_clk, &pin_di);
 
-        Self {
-            sm_cs,
-            sm_rx,
-            sm_tx,
-            dma: Some(dma),
+        (
+            Self {
+                sm_cs,
+                sm_rx,
+                sm_tx,
+                dma: Some(dma),
+                _pio_irq: marker::PhantomData {},
+            },
+            EXIIntHandler {
+                _pio: marker::PhantomData {},
+                _pio_irq: marker::PhantomData {},
+            },
+        )
+    }
+
+    /// Wait for the next rising edge on CS
+    pub(crate) async fn transaction_end<PIO, W>(&self, pio: &mut PIO, cs_waker: &mut W)
+    where
+        PIO: rtic::Mutex<T = pio::PIO<P>>,
+        W: rtic::Mutex<T = Option<task::Waker>>,
+    {
+        pio.lock(|pio| {
+            pio.clear_irq(1 << CS_IRQ);
+        });
+        future::poll_fn(|poll_ctx| {
+            pio.lock(|pio| {
+                if pio.get_irq_raw() & (1 << CS_IRQ) != 0 {
+                    pio.clear_irq(1 << CS_IRQ);
+                    return core::task::Poll::Ready(());
+                }
+
+                cs_waker.lock(|w| {
+                    w.replace(poll_ctx.waker().clone());
+                });
+                pio.irq::<PioIRQ>().enable_sm_interrupt(CS_IRQ);
+                core::task::Poll::Pending
+            })
+        })
+        .await;
+    }
+}
+
+impl<P, PioIRQ: pio::IRQIndex, const CS_IRQ: u8> EXIIntHandler<P, PioIRQ, CS_IRQ>
+where
+    P: pio::PIOExt,
+{
+    /// The real ISR implementation
+    pub(crate) fn on_pio_interrupt(&self, pio: &pio::PIO<P>, cs_waker: &mut Option<task::Waker>) {
+        let irq = pio.irq::<PioIRQ>();
+        if pio.get_irq_raw() & (1 << CS_IRQ) != 0 {
+            irq.disable_sm_interrupt(CS_IRQ);
+            cs_waker.take().map(|w| w.wake());
         }
     }
 }

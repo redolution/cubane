@@ -37,11 +37,13 @@ mod app {
     #[shared]
     struct Shared {
         pio0: pio::PIO<pac::PIO0>,
+        cs_waker: Option<core::task::Waker>,
     }
 
     #[local]
     struct Local {
-        exi: exi::EXI<pac::PIO0, pio::SM0, pio::SM1, pio::SM2, dma::CH0>,
+        exi: exi::EXI<pac::PIO0, pio::SM0, pio::SM1, pio::SM2, dma::CH0, pio::IRQ0, 0>,
+        exi_int: exi::EXIIntHandler<pac::PIO0, pio::IRQ0, 0>,
     }
 
     #[init]
@@ -73,24 +75,44 @@ mod app {
         let (mut pio0, pio0_sm0, pio0_sm1, pio0_sm2, _) =
             ctx.device.PIO0.split(&mut ctx.device.RESETS);
 
-        let irq_cs = 0;
-        let exi = exi::EXI::new(
-            &mut pio0, irq_cs, pio0_sm0, pio0_sm1, pio0_sm2, pins.gpio4, pins.gpio5, pins.gpio3,
+        let (exi, exi_int) = exi::EXI::new(
+            &mut pio0, pio0_sm0, pio0_sm1, pio0_sm2, pins.gpio4, pins.gpio5, pins.gpio3,
             pins.gpio6, dma.ch0,
         );
-        pio0.irq0().enable_sm_interrupt(irq_cs);
 
         root::spawn().unwrap();
 
-        (Shared { pio0 }, Local { exi })
+        (
+            Shared {
+                pio0,
+                cs_waker: None,
+            },
+            Local { exi, exi_int },
+        )
     }
 
-    #[task(local = [exi])]
-    async fn root(_ctx: root::Context) {
+    #[task(local = [exi], shared = [pio0, cs_waker])]
+    async fn root(ctx: root::Context) {
+        let root::SharedResources {
+            mut pio0,
+            mut cs_waker,
+            ..
+        } = ctx.shared;
+        let root::LocalResources { exi, .. } = ctx.local;
+
+        loop {
+            exi.transaction_end(&mut pio0, &mut cs_waker).await;
+            defmt::debug!("hello world");
+        }
     }
 
-    #[task(binds = PIO0_IRQ_0, shared = [&pio0])]
+    #[task(binds = PIO0_IRQ_0, local = [exi_int], shared = [pio0, cs_waker])]
     fn pio0_irq0(ctx: pio0_irq0::Context) {
-        ctx.shared.pio0.clear_irq(1 << 0);
+        let pio0_irq0::SharedResources { pio0, cs_waker, .. } = ctx.shared;
+        let pio0_irq0::LocalResources { exi_int, .. } = ctx.local;
+
+        (pio0, cs_waker).lock(|pio, cs_waker| {
+            exi_int.on_pio_interrupt(pio, cs_waker);
+        });
     }
 }
