@@ -13,15 +13,22 @@ pub(crate) fn capture_trace<P, SMI, CH>(
     SMI: pio::StateMachineIndex,
     CH: dma::SingleChannel,
 {
-    let program = pio_proc::pio_asm!(
-        "wait 1 gpio 4",
-        "wait 0 gpio 4",
-        ".wrap_target",
-        "in pins, 8",
-        ".wrap",
-    );
+    let pin_cs = 4;
 
-    let installed = pio.install(&program.program).unwrap();
+    let mut a = ::pio::Assembler::<{ ::pio::RP2040_MAX_PROGRAM_SIZE }>::new();
+    let mut wrap_source = a.label();
+    let mut wrap_target = a.label();
+    {
+        use ::pio::*;
+        a.wait(1, WaitSource::GPIO, pin_cs, false);
+        a.wait(0, WaitSource::GPIO, pin_cs, false);
+        a.bind(&mut wrap_target);
+        a.r#in(InSource::PINS, 8);
+        a.bind(&mut wrap_source);
+    }
+    let program = a.assemble_with_wrap(wrap_source, wrap_target);
+
+    let installed = pio.install(&program).unwrap();
     let (sm, rx, _) = pio::PIOBuilder::from_program(installed)
         // Hardware pinout:
         // 3: DO

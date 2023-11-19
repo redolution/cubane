@@ -315,6 +315,7 @@ where
     PIOStateMachine { sm, rx, tx }
 }
 
+/*
 pub(crate) fn install_di_driver<P, SMI, CH>(
     pio: &mut pio::PIO<P>,
     sm: pio::UninitStateMachine<(P, SMI)>,
@@ -368,3 +369,4 @@ pub(crate) fn install_di_driver<P, SMI, CH>(
         (dma_chan, _, tx) = transfer.wait();
     }
 }
+*/

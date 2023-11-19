@@ -14,7 +14,6 @@ embedded-hal = { version = "0.2.5", features = ["unproven"] }
 futures-util = { version = "0.3", default_features = false }
 panic-probe = { version = "0.3", features = ["print-defmt"] }
 pio = "0.2"
-pio-proc = "0.2"
 rp-pico = "0.8"
 rtic = { version = "2.0", features = ["thumbv6-backend"] }
 static_assertions = "1.1"
