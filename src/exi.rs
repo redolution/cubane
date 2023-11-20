@@ -56,7 +56,7 @@ pub(crate) struct Exi<
     RX: pio::StateMachineIndex,
     TX: pio::StateMachineIndex,
     CHI: dma::ChannelIndex,
-    PioIRQ: pio::IRQIndex,
+    const PIO_IRQ: usize,
     const CS_IRQ: u8,
 > {
     /// The chip-select monitor
@@ -72,14 +72,11 @@ pub(crate) struct Exi<
 
     /// A single DMA channel ought to be enough for anybody
     dma: Option<dma::Channel<CHI>>,
-
-    _pio_irq: marker::PhantomData<PioIRQ>,
 }
 
 /// ZST to encapsulate the ISR implementation
-pub(crate) struct ExiIntHandler<P: pio::PIOExt, PioIRQ: pio::IRQIndex, const CS_IRQ: u8> {
+pub(crate) struct ExiIntHandler<P: pio::PIOExt, const PIO_IRQ: usize, const CS_IRQ: u8> {
     _pio: marker::PhantomData<P>,
-    _pio_irq: marker::PhantomData<PioIRQ>,
 }
 
 /// Pin mapping
@@ -90,8 +87,8 @@ pub(crate) struct ExiPins<CS: gpio::AnyPin, CLK: gpio::AnyPin, DO: gpio::AnyPin,
     pub di: DI,
 }
 
-impl<P, CS, RX, TX, CHI, PioIRQ: pio::IRQIndex, const CS_IRQ: u8>
-    Exi<P, CS, RX, TX, CHI, PioIRQ, CS_IRQ>
+impl<P, CS, RX, TX, CHI, const PIO_IRQ: usize, const CS_IRQ: u8>
+    Exi<P, CS, RX, TX, CHI, PIO_IRQ, CS_IRQ>
 where
     P: pio::PIOExt,
     CS: pio::StateMachineIndex,
@@ -110,7 +107,7 @@ where
         ),
         pins: ExiPins<PinCs, PinClk, PinDo, PinDi>,
         dma: dma::Channel<CHI>,
-    ) -> (Self, ExiIntHandler<P, PioIRQ, CS_IRQ>)
+    ) -> (Self, ExiIntHandler<P, PIO_IRQ, CS_IRQ>)
     where
         PinCs: gpio::AnyPin,
         PinCs::Id: gpio::ValidFunction<P::PinFunction>,
@@ -143,11 +140,9 @@ where
                 sm_rx,
                 sm_tx,
                 dma: Some(dma),
-                _pio_irq: marker::PhantomData {},
             },
             ExiIntHandler {
                 _pio: marker::PhantomData {},
-                _pio_irq: marker::PhantomData {},
             },
         )
     }
@@ -171,7 +166,7 @@ where
                 cs_waker.lock(|w| {
                     w.replace(poll_ctx.waker().clone());
                 });
-                pio.irq::<PioIRQ>().enable_sm_interrupt(CS_IRQ);
+                pio.irq::<PIO_IRQ>().enable_sm_interrupt(CS_IRQ);
                 core::task::Poll::Pending
             })
         })
@@ -179,13 +174,13 @@ where
     }
 }
 
-impl<P, PioIRQ: pio::IRQIndex, const CS_IRQ: u8> ExiIntHandler<P, PioIRQ, CS_IRQ>
+impl<P, const PIO_IRQ: usize, const CS_IRQ: u8> ExiIntHandler<P, PIO_IRQ, CS_IRQ>
 where
     P: pio::PIOExt,
 {
     /// The real ISR implementation
     pub(crate) fn on_pio_interrupt(&self, pio: &pio::PIO<P>, cs_waker: &mut Option<task::Waker>) {
-        let irq = pio.irq::<PioIRQ>();
+        let irq = pio.irq::<PIO_IRQ>();
         if pio.get_irq_raw() & (1 << CS_IRQ) != 0 {
             irq.disable_sm_interrupt(CS_IRQ);
             if let Some(w) = cs_waker.take() {

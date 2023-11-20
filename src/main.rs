@@ -42,8 +42,8 @@ mod app {
 
     #[local]
     struct Local {
-        exi: exi::Exi<pac::PIO0, pio::SM0, pio::SM1, pio::SM2, dma::CH0, pio::IRQ0, 0>,
-        exi_int: exi::ExiIntHandler<pac::PIO0, pio::IRQ0, 0>,
+        exi: exi::Exi<pac::PIO0, pio::SM0, pio::SM1, pio::SM2, dma::CH0, 0, 0>,
+        exi_int: exi::ExiIntHandler<pac::PIO0, 0, 0>,
     }
 
     #[init]

@@ -436,7 +436,7 @@ dependencies = [
 [[package]]
 name = "rp2040-hal"
 version = "0.9.1"
-source = "git+https://github.com/redolution/rp-hal.git?branch=v0.9.x#580e893824a4a6da4b392174438df73dd7d02ea9"
+source = "git+https://github.com/redolution/rp-hal.git?branch=v0.9.x#04669cda0d856097fff1093c77cc397ae9983d99"
 dependencies = [
  "cortex-m",
  "critical-section",
@@ -459,7 +459,7 @@ dependencies = [
 [[package]]
 name = "rp2040-hal-macros"
 version = "0.1.0"
-source = "git+https://github.com/redolution/rp-hal.git?branch=v0.9.x#580e893824a4a6da4b392174438df73dd7d02ea9"
+source = "git+https://github.com/redolution/rp-hal.git?branch=v0.9.x#04669cda0d856097fff1093c77cc397ae9983d99"
 dependencies = [
  "proc-macro2",
  "quote",
