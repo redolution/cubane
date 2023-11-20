@@ -12,7 +12,8 @@ use crate::bsp::{
 };
 
 // Portability: the PLL configurations assume that the board has a 12MHz crystal
-static_assertions::const_assert_eq!(bsp::XOSC_CRYSTAL_FREQ, 12_000_000);
+#[allow(clippy::assertions_on_constants)]
+const _: () = assert!(bsp::XOSC_CRYSTAL_FREQ == 12_000_000);
 
 /// Initialize the clock tree according to project requirements
 ///
