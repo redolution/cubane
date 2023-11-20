@@ -43,14 +43,14 @@ use futures_util::future;
 use crate::bsp::hal::{dma, gpio, pio};
 
 /// Simple container type for a PIO state machine and its FIFOs
-struct PIOStateMachine<P: pio::PIOExt, SMI: pio::StateMachineIndex> {
+struct PioStateMachine<P: pio::PIOExt, SMI: pio::StateMachineIndex> {
     sm: pio::StateMachine<(P, SMI), pio::Running>,
     rx: pio::Rx<(P, SMI)>,
     tx: pio::Tx<(P, SMI)>,
 }
 
 /// The actual EXI implementation
-pub(crate) struct EXI<
+pub(crate) struct Exi<
     P: pio::PIOExt,
     CS: pio::StateMachineIndex,
     RX: pio::StateMachineIndex,
@@ -62,13 +62,13 @@ pub(crate) struct EXI<
     /// The chip-select monitor
     ///
     /// Watches for CS changes, triggers interrupts and disables the DI output.
-    sm_cs: PIOStateMachine<P, CS>,
+    sm_cs: PioStateMachine<P, CS>,
 
     /// The data receive state machine
-    sm_rx: PIOStateMachine<P, RX>,
+    sm_rx: PioStateMachine<P, RX>,
 
     /// The data transmit state machine
-    sm_tx: PIOStateMachine<P, TX>,
+    sm_tx: PioStateMachine<P, TX>,
 
     /// A single DMA channel ought to be enough for anybody
     dma: Option<dma::Channel<CHI>>,
@@ -77,13 +77,21 @@ pub(crate) struct EXI<
 }
 
 /// ZST to encapsulate the ISR implementation
-pub(crate) struct EXIIntHandler<P: pio::PIOExt, PioIRQ: pio::IRQIndex, const CS_IRQ: u8> {
+pub(crate) struct ExiIntHandler<P: pio::PIOExt, PioIRQ: pio::IRQIndex, const CS_IRQ: u8> {
     _pio: marker::PhantomData<P>,
     _pio_irq: marker::PhantomData<PioIRQ>,
 }
 
+/// Pin mapping
+pub(crate) struct ExiPins<CS: gpio::AnyPin, CLK: gpio::AnyPin, DO: gpio::AnyPin, DI: gpio::AnyPin> {
+    pub cs: CS,
+    pub clk: CLK,
+    pub r#do: DO,
+    pub di: DI,
+}
+
 impl<P, CS, RX, TX, CHI, PioIRQ: pio::IRQIndex, const CS_IRQ: u8>
-    EXI<P, CS, RX, TX, CHI, PioIRQ, CS_IRQ>
+    Exi<P, CS, RX, TX, CHI, PioIRQ, CS_IRQ>
 where
     P: pio::PIOExt,
     CS: pio::StateMachineIndex,
@@ -92,19 +100,17 @@ where
     CHI: dma::ChannelIndex,
 {
     /// Initialize EXI with all the resources it requires
+    #[allow(clippy::type_complexity)] // This lint doesn't like the scary tuple
     pub(crate) fn new<PinCs, PinClk, PinDo, PinDi>(
         pio: &mut pio::PIO<P>,
-        sm_cs: pio::UninitStateMachine<(P, CS)>,
-        sm_rx: pio::UninitStateMachine<(P, RX)>,
-        sm_tx: pio::UninitStateMachine<(P, TX)>,
-
-        pin_cs: PinCs,
-        pin_clk: PinClk,
-        pin_do: PinDo,
-        pin_di: PinDi,
-
+        state_machines: (
+            pio::UninitStateMachine<(P, CS)>,
+            pio::UninitStateMachine<(P, RX)>,
+            pio::UninitStateMachine<(P, TX)>,
+        ),
+        pins: ExiPins<PinCs, PinClk, PinDo, PinDi>,
         dma: dma::Channel<CHI>,
-    ) -> (Self, EXIIntHandler<P, PioIRQ, CS_IRQ>)
+    ) -> (Self, ExiIntHandler<P, PioIRQ, CS_IRQ>)
     where
         PinCs: gpio::AnyPin,
         PinCs::Id: gpio::ValidFunction<P::PinFunction>,
@@ -115,16 +121,18 @@ where
         PinDi: gpio::AnyPin,
         PinDi::Id: gpio::ValidFunction<P::PinFunction>,
     {
-        let pin_cs = pin_cs
+        let pin_cs = pins
+            .cs
             .into()
             .into_function()
             .into_pull_type::<gpio::PullUp>();
-        let pin_clk = pin_clk.into().into_function();
-        let pin_do = pin_do.into().into_function();
-        let mut pin_di = pin_di.into().into_function();
+        let pin_clk = pins.clk.into().into_function();
+        let pin_do = pins.r#do.into().into_function();
+        let mut pin_di = pins.di.into().into_function();
         // Required to outdrive RTC-DOL
         pin_di.set_drive_strength(gpio::OutputDriveStrength::EightMilliAmps);
 
+        let (sm_cs, sm_rx, sm_tx) = state_machines;
         let sm_cs = init_sm_cs(pio, sm_cs, CS_IRQ, &pin_cs, &pin_di);
         let sm_rx = init_sm_rx(pio, sm_rx, &pin_cs, &pin_clk, &pin_do);
         let sm_tx = init_sm_tx(pio, sm_tx, &pin_clk, &pin_di);
@@ -137,7 +145,7 @@ where
                 dma: Some(dma),
                 _pio_irq: marker::PhantomData {},
             },
-            EXIIntHandler {
+            ExiIntHandler {
                 _pio: marker::PhantomData {},
                 _pio_irq: marker::PhantomData {},
             },
@@ -171,7 +179,7 @@ where
     }
 }
 
-impl<P, PioIRQ: pio::IRQIndex, const CS_IRQ: u8> EXIIntHandler<P, PioIRQ, CS_IRQ>
+impl<P, PioIRQ: pio::IRQIndex, const CS_IRQ: u8> ExiIntHandler<P, PioIRQ, CS_IRQ>
 where
     P: pio::PIOExt,
 {
@@ -180,7 +188,9 @@ where
         let irq = pio.irq::<PioIRQ>();
         if pio.get_irq_raw() & (1 << CS_IRQ) != 0 {
             irq.disable_sm_interrupt(CS_IRQ);
-            cs_waker.take().map(|w| w.wake());
+            if let Some(w) = cs_waker.take() {
+                w.wake();
+            }
         }
     }
 }
@@ -194,7 +204,7 @@ fn init_sm_cs<P, SMI, PinCs, PinDi>(
     irq_cs: u8,
     pin_cs: &PinCs,
     pin_di: &PinDi,
-) -> PIOStateMachine<P, SMI>
+) -> PioStateMachine<P, SMI>
 where
     P: pio::PIOExt,
     SMI: pio::StateMachineIndex,
@@ -230,7 +240,7 @@ where
         .build(sm);
     let sm = sm.start();
 
-    PIOStateMachine { sm, rx, tx }
+    PioStateMachine { sm, rx, tx }
 }
 
 /// The RX state machine
@@ -240,7 +250,7 @@ fn init_sm_rx<P, SMI, PinCs, PinClk, PinDo>(
     pin_cs: &PinCs,
     pin_clk: &PinClk,
     pin_do: &PinDo,
-) -> PIOStateMachine<P, SMI>
+) -> PioStateMachine<P, SMI>
 where
     P: pio::PIOExt,
     SMI: pio::StateMachineIndex,
@@ -273,7 +283,7 @@ where
         .build(sm);
     let sm = sm.start();
 
-    PIOStateMachine { sm, rx, tx }
+    PioStateMachine { sm, rx, tx }
 }
 
 /// The TX state machine
@@ -282,7 +292,7 @@ fn init_sm_tx<P, SMI, PinClk, PinDi>(
     sm: pio::UninitStateMachine<(P, SMI)>,
     pin_clk: &PinClk,
     pin_di: &PinDi,
-) -> PIOStateMachine<P, SMI>
+) -> PioStateMachine<P, SMI>
 where
     P: pio::PIOExt,
     SMI: pio::StateMachineIndex,
@@ -312,7 +322,7 @@ where
         .build(sm);
     let sm = sm.start();
 
-    PIOStateMachine { sm, rx, tx }
+    PioStateMachine { sm, rx, tx }
 }
 
 /*

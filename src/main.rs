@@ -42,8 +42,8 @@ mod app {
 
     #[local]
     struct Local {
-        exi: exi::EXI<pac::PIO0, pio::SM0, pio::SM1, pio::SM2, dma::CH0, pio::IRQ0, 0>,
-        exi_int: exi::EXIIntHandler<pac::PIO0, pio::IRQ0, 0>,
+        exi: exi::Exi<pac::PIO0, pio::SM0, pio::SM1, pio::SM2, dma::CH0, pio::IRQ0, 0>,
+        exi_int: exi::ExiIntHandler<pac::PIO0, pio::IRQ0, 0>,
     }
 
     #[init]
@@ -72,12 +72,19 @@ mod app {
 
         let dma = ctx.device.DMA.split(&mut ctx.device.RESETS);
 
-        let (mut pio0, pio0_sm0, pio0_sm1, pio0_sm2, _) =
+        let (mut pio0, pio0_sm0, pio0_sm1, pio0_sm2, _pio0_sm3) =
             ctx.device.PIO0.split(&mut ctx.device.RESETS);
 
-        let (exi, exi_int) = exi::EXI::new(
-            &mut pio0, pio0_sm0, pio0_sm1, pio0_sm2, pins.gpio4, pins.gpio5, pins.gpio3,
-            pins.gpio6, dma.ch0,
+        let (exi, exi_int) = exi::Exi::new(
+            &mut pio0,
+            (pio0_sm0, pio0_sm1, pio0_sm2),
+            exi::ExiPins {
+                cs: pins.gpio4,
+                clk: pins.gpio5,
+                r#do: pins.gpio3,
+                di: pins.gpio6,
+            },
+            dma.ch0,
         );
 
         root::spawn().unwrap();
