@@ -45,8 +45,8 @@ use crate::bsp::hal::{dma, gpio, pio};
 /// Simple container type for a PIO state machine and its FIFOs
 struct PioStateMachine<P: pio::PIOExt, SMI: pio::StateMachineIndex> {
     sm: pio::StateMachine<(P, SMI), pio::Running>,
-    rx: pio::Rx<(P, SMI)>,
-    tx: pio::Tx<(P, SMI)>,
+    rx: Option<pio::Rx<(P, SMI)>>,
+    tx: Option<pio::Tx<(P, SMI)>>,
 }
 
 /// The actual EXI implementation
@@ -172,6 +172,44 @@ where
         })
         .await;
     }
+
+    /// Respond to a command
+    pub(crate) async fn respond<PIO, W>(
+        &mut self,
+        pio: &mut PIO,
+        cs_waker: &mut W,
+        body: &'static [u32],
+    ) where
+        PIO: rtic::Mutex<T = pio::PIO<P>>,
+        W: rtic::Mutex<T = Option<task::Waker>>,
+    {
+        let chan = self.dma.take().unwrap();
+        let mut tx = self.sm_tx.tx.take().unwrap();
+
+        // Enable DI output
+        self.sm_cs.sm.exec_instruction(::pio::Instruction {
+            operands: ::pio::InstructionOperands::SET {
+                destination: ::pio::SetDestination::PINDIRS,
+                data: 1,
+            },
+            delay: 0,
+            side_set: None,
+        });
+
+        tx.write(0); // Dummy word for the command/address
+
+        let mut config = dma::single_buffer::Config::new(chan, body, tx);
+        config.bswap(true);
+        let transfer = config.start();
+
+        self.transaction_end(pio, cs_waker).await;
+        assert!(transfer.is_done());
+        let (chan, _, tx) = transfer.wait();
+        assert!(tx.is_empty());
+
+        self.sm_tx.tx.replace(tx);
+        self.dma.replace(chan);
+    }
 }
 
 impl<P, const PIO_IRQ: usize, const CS_IRQ: u8> ExiIntHandler<P, PIO_IRQ, CS_IRQ>
@@ -235,7 +273,11 @@ where
         .build(sm);
     let sm = sm.start();
 
-    PioStateMachine { sm, rx, tx }
+    PioStateMachine {
+        sm,
+        rx: Some(rx),
+        tx: Some(tx),
+    }
 }
 
 /// The RX state machine
@@ -278,7 +320,11 @@ where
         .build(sm);
     let sm = sm.start();
 
-    PioStateMachine { sm, rx, tx }
+    PioStateMachine {
+        sm,
+        rx: Some(rx),
+        tx: Some(tx),
+    }
 }
 
 /// The TX state machine
@@ -317,61 +363,9 @@ where
         .build(sm);
     let sm = sm.start();
 
-    PioStateMachine { sm, rx, tx }
-}
-
-/*
-pub(crate) fn install_di_driver<P, SMI, CH>(
-    pio: &mut pio::PIO<P>,
-    sm: pio::UninitStateMachine<(P, SMI)>,
-    cs_pin_id: u8,
-    clk_pin_id: u8,
-    di_pin_id: u8,
-    dma_chan: CH,
-) where
-    P: pio::PIOExt,
-    SMI: pio::StateMachineIndex,
-    CH: dma::SingleChannel,
-{
-    let program = pio_proc::pio_asm!(
-        ".wrap_target",
-        "out pins, 1",
-        "wait 0 gpio 5",
-        "wait 1 gpio 5",
-        ".wrap",
-    );
-
-    let installed = pio.install(&program.program).unwrap();
-    let (mut sm, _, tx) = pio::PIOBuilder::from_program(installed)
-        .set_pins(di_pin_id, 1)
-        .out_pins(di_pin_id, 1)
-        .in_pin_base(cs_pin_id)
-        .autopull(true)
-        .build(sm);
-    sm.set_pindirs([
-        (cs_pin_id, pio::PinDir::Input),
-        (clk_pin_id, pio::PinDir::Input),
-        (di_pin_id, pio::PinDir::Output),
-    ]);
-    sm.start();
-
-    let payload = unsafe { &crate::_payload };
-    assert_eq!(u32::from_be(payload[0]), 0x49504C42); // "IPLB"
-    assert_eq!(u32::from_be(payload[1]), 0x4F4F5420); // "OOT "
-    let size = u32::from_be(payload[2]) as usize / core::mem::size_of_val(&payload[0]);
-    assert!(size <= payload.len());
-    let payload = &payload[..size];
-    assert_eq!(u32::from_be(payload[size - 1]), 0x5049434F); // "PICO"
-
-    let block = &payload[..256 / 4];
-    let (mut dma_chan, mut tx) = (dma_chan, tx);
-    loop {
-        while tx.is_full() {}
-        tx.write(0); // Dummy word for the command/address
-        let mut config = dma::single_buffer::Config::new(dma_chan, block, tx);
-        config.bswap(true);
-        let transfer = config.start();
-        (dma_chan, _, tx) = transfer.wait();
+    PioStateMachine {
+        sm,
+        rx: Some(rx),
+        tx: Some(tx),
     }
 }
-*/

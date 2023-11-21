@@ -126,9 +126,10 @@ mod app {
         } = ctx.shared;
         let root::LocalResources { exi, payload, .. } = ctx.local;
 
+        exi.transaction_end(&mut pio0, &mut cs_waker).await;
         loop {
-            exi.transaction_end(&mut pio0, &mut cs_waker).await;
-            defmt::debug!("hello world");
+            let block = &payload[..256 / 4];
+            exi.respond(&mut pio0, &mut cs_waker, block).await;
         }
     }
 
