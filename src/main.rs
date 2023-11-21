@@ -17,6 +17,18 @@ extern "C" {
     static _payload: [u32; (2048 - 512) * 1024 / core::mem::size_of::<u32>()];
 }
 
+fn check_payload() -> &'static [u32] {
+    let payload = unsafe { &crate::_payload };
+    assert_eq!(u32::from_be(payload[0]), 0x49504C42); // "IPLB"
+    assert_eq!(u32::from_be(payload[1]), 0x4F4F5420); // "OOT "
+    let size = u32::from_be(payload[2]) as usize / core::mem::size_of_val(&payload[0]);
+    assert!(size <= payload.len());
+    let payload = &payload[..size];
+    assert_eq!(u32::from_be(payload[size - 1]), 0x5049434F); // "PICO"
+
+    payload
+}
+
 #[rtic::app(
     device = crate::bsp::pac,
     dispatchers = [TIMER_IRQ_1],
@@ -44,6 +56,7 @@ mod app {
     struct Local {
         exi: exi::Exi<pac::PIO0, pio::SM0, pio::SM1, pio::SM2, dma::CH0, 0, 0>,
         exi_int: exi::ExiIntHandler<pac::PIO0, 0, 0>,
+        payload: &'static [u32],
     }
 
     #[init]
@@ -87,6 +100,8 @@ mod app {
             dma.ch0,
         );
 
+        let payload = crate::check_payload();
+
         root::spawn().unwrap();
 
         (
@@ -94,18 +109,22 @@ mod app {
                 pio0,
                 cs_waker: None,
             },
-            Local { exi, exi_int },
+            Local {
+                exi,
+                exi_int,
+                payload,
+            },
         )
     }
 
-    #[task(local = [exi], shared = [pio0, cs_waker])]
+    #[task(local = [exi, payload], shared = [pio0, cs_waker])]
     async fn root(ctx: root::Context) {
         let root::SharedResources {
             mut pio0,
             mut cs_waker,
             ..
         } = ctx.shared;
-        let root::LocalResources { exi, .. } = ctx.local;
+        let root::LocalResources { exi, payload, .. } = ctx.local;
 
         loop {
             exi.transaction_end(&mut pio0, &mut cs_waker).await;
