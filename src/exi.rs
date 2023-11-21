@@ -147,7 +147,7 @@ where
         )
     }
 
-    /// Wait for the next rising edge on CS
+    /// Wait for CS to be deasserted (edge-triggered)
     pub(crate) async fn transaction_end<PIO, W>(&self, pio: &mut PIO, cs_waker: &mut W)
     where
         PIO: rtic::Mutex<T = pio::PIO<P>>,
@@ -156,6 +156,15 @@ where
         pio.lock(|pio| {
             pio.clear_irq(1 << CS_IRQ);
         });
+        self.bus_idle(pio, cs_waker).await;
+    }
+
+    /// Wait for CS to be deasserted (level-triggered)
+    pub(crate) async fn bus_idle<PIO, W>(&self, pio: &mut PIO, cs_waker: &mut W)
+    where
+        PIO: rtic::Mutex<T = pio::PIO<P>>,
+        W: rtic::Mutex<T = Option<task::Waker>>,
+    {
         future::poll_fn(|poll_ctx| {
             pio.lock(|pio| {
                 if pio.get_irq_raw() & (1 << CS_IRQ) != 0 {
