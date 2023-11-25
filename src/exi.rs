@@ -196,14 +196,19 @@ where
         let mut tx = self.sm_tx.tx.take().unwrap();
 
         // Enable DI output
-        self.sm_cs.sm.exec_instruction(::pio::Instruction {
-            operands: ::pio::InstructionOperands::SET {
-                destination: ::pio::SetDestination::PINDIRS,
-                data: 1,
-            },
-            delay: 0,
-            side_set: None,
-        });
+        {
+            let mut tx = self.sm_cs.tx.take().unwrap();
+            tx.write(
+                // This disregards delay and side-set, but we don't really care
+                ::pio::InstructionOperands::SET {
+                    destination: ::pio::SetDestination::PINDIRS,
+                    data: 1,
+                }
+                .encode()
+                .into(),
+            );
+            self.sm_cs.tx.replace(tx);
+        }
 
         tx.write(0); // Dummy word for the command/address
 
@@ -239,7 +244,7 @@ where
 
 /// The CS monitor state machine
 ///
-/// Responsible for disabling the DI output and providing an interrupt when CS is deasserted.
+/// Responsible for toggling the DI output and providing an interrupt when CS is deasserted.
 fn init_sm_cs<P, SMI, PinCs, PinDi>(
     pio: &mut pio::PIO<P>,
     sm: pio::UninitStateMachine<(P, SMI)>,
@@ -262,10 +267,21 @@ where
     let mut cs_high = a.label();
     {
         use ::pio::*;
+
+        // `pull noblock` is equivalent to `mov osr, x` if the FIFO is empty.
+        // Initialize x with a nop.
+        a.pull(false, true);
+        a.out(OutDestination::X, 32);
+
         a.jmp(JmpCondition::PinHigh, &mut cs_high);
 
         a.bind(&mut wrap_target);
         a.wait(0, WaitSource::GPIO, pin_cs, false);
+
+        // Execute one instruction from the FIFO when CS is asserted.
+        // This allows enabling the output asynchronously.
+        a.pull(false, false);
+        a.out(OutDestination::EXEC, 32);
 
         a.wait(1, WaitSource::GPIO, pin_cs, false);
         a.bind(&mut cs_high);
@@ -276,11 +292,26 @@ where
     let program = a.assemble_with_wrap(wrap_source, wrap_target);
 
     let installed = pio.install(&program).unwrap();
-    let (sm, rx, tx) = pio::PIOBuilder::from_program(installed)
+    let (sm, rx, mut tx) = pio::PIOBuilder::from_program(installed)
         .jmp_pin(pin_cs)
         .set_pins(pin_di, 1)
         .build(sm);
     let sm = sm.start();
+
+    tx.write(
+        // `mov y, y` is the canonical nop
+        ::pio::Instruction {
+            operands: ::pio::InstructionOperands::MOV {
+                destination: ::pio::MovDestination::Y,
+                op: ::pio::MovOperation::None,
+                source: ::pio::MovSource::Y,
+            },
+            delay: 0,
+            side_set: None,
+        }
+        .encode(program.side_set)
+        .into(),
+    );
 
     PioStateMachine {
         sm,
