@@ -88,17 +88,24 @@ mod app {
         let (mut pio0, pio0_sm0, pio0_sm1, pio0_sm2, _pio0_sm3) =
             ctx.device.PIO0.split(&mut ctx.device.RESETS);
 
-        let (exi, exi_int) = exi::Exi::new(
-            &mut pio0,
-            (pio0_sm0, pio0_sm1, pio0_sm2),
-            exi::ExiPins {
-                cs: pins.gpio4,
-                clk: pins.gpio5,
-                r#do: pins.gpio3,
-                di: pins.gpio6,
-            },
-            dma.ch0,
-        );
+        #[cfg(not(feature = "pbcompat"))]
+        let exi_pins = exi::ExiPins {
+            cs: pins.gpio28,
+            clk: pins.gpio22,
+            r#do: pins.gpio26,
+            di: pins.gpio27,
+        };
+
+        #[cfg(feature = "pbcompat")]
+        let exi_pins = exi::ExiPins {
+            cs: pins.gpio4,
+            clk: pins.gpio5,
+            r#do: pins.gpio3,
+            di: pins.gpio6,
+        };
+
+        let (exi, exi_int) =
+            exi::Exi::new(&mut pio0, (pio0_sm0, pio0_sm1, pio0_sm2), exi_pins, dma.ch0);
 
         let payload = crate::check_payload();
 

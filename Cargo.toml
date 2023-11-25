@@ -21,6 +21,9 @@ rtic = { version = "2.0", features = ["thumbv6-backend"] }
 #rp2040-hal = { path = "./rp-hal/rp2040-hal" }
 rp2040-hal = { git = "https://github.com/redolution/rp-hal.git", branch = "v0.9.x" }
 
+[features]
+pbcompat = []
+
 # cargo build/run
 [profile.dev]
 codegen-units = 1
