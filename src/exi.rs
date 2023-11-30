@@ -143,7 +143,7 @@ where
         let (sm_cs, sm_rx, sm_tx, sm_cmd) = state_machines;
         let sm_cs = init_sm_cs(pio, sm_cs, CS_IRQ, &pin_cs, &pin_di);
         let sm_rx = init_sm_rx(pio, sm_rx, &pin_cs, &pin_clk, &pin_do);
-        let sm_tx = init_sm_tx(pio, sm_tx, &pin_clk, &pin_di);
+        let sm_tx = init_sm_tx(pio, sm_tx, &pin_cs, &pin_clk, &pin_di);
         let sm_cmd = init_sm_cmd(pio, sm_cmd, CMD_IRQ, &pin_cs, &pin_clk, &pin_do);
 
         (
@@ -208,7 +208,7 @@ where
     }
 
     /// Receive a command
-    pub(crate) async fn receive_command<PIO, W>(
+    pub(crate) fn receive_command<PIO, W>(
         &mut self,
         pio: &mut PIO,
         cmd_waker: &mut W,
@@ -219,8 +219,9 @@ where
     {
         pio.lock(|pio| {
             pio.clear_irq(1 << CMD_IRQ);
+            while (pio.get_irq_raw() & (1 << CMD_IRQ)) == 0 {}
         });
-        self.wait_irq(pio, cmd_waker, CMD_IRQ).await;
+        //self.wait_irq(pio, cmd_waker, CMD_IRQ).await;
 
         let mut rx = self.sm_cmd.rx.take().unwrap();
         let res = rx.read();
@@ -230,7 +231,7 @@ where
     }
 
     /// Respond to a command
-    pub(crate) async fn respond<PIO, W>(
+    pub(crate) fn respond<PIO, W>(
         &mut self,
         pio: &mut PIO,
         cs_waker: &mut W,
@@ -243,6 +244,7 @@ where
         let mut tx = self.sm_tx.tx.take().unwrap();
 
         // Enable DI output
+        /*
         {
             let mut tx = self.sm_cs.tx.take().unwrap();
             tx.write(
@@ -256,17 +258,32 @@ where
             );
             self.sm_cs.tx.replace(tx);
         }
+        */
 
+        /*
+        self.sm_tx.sm.exec_instruction(::pio::Instruction {
+            operands: ::pio::InstructionOperands::WAIT {
+                polarity: 1,
+                source: ::pio::WaitSource::GPIO,
+                index: 28,
+                relative: false,
+            },
+            delay: 0,
+            side_set: None,
+        });
+        */
+
+        while tx.is_full() {}
         tx.write(0); // Dummy word for the command/address
 
         let mut config = dma::single_buffer::Config::new(chan, body, tx);
         config.bswap(true);
         let transfer = config.start();
 
-        self.transaction_end(pio, cs_waker).await;
-        assert!(transfer.is_done());
+        //self.transaction_end(pio, cs_waker).await;
+        //assert!(transfer.is_done());
         let (chan, _, tx) = transfer.wait();
-        assert!(tx.is_empty());
+        //assert!(tx.is_empty());
 
         self.sm_tx.tx.replace(tx);
         self.dma.replace(chan);
@@ -332,8 +349,9 @@ where
 
         a.wait(1, WaitSource::GPIO, pin_cs, false);
         a.bind(&mut cs_high);
-        a.irq(false, false, irq_cs, false);
-        a.set(SetDestination::PINDIRS, 0);
+        a.nop();
+        //a.irq(false, false, irq_cs, false);
+        //a.set(SetDestination::PINDIRS, 0);
         a.bind(&mut wrap_source);
     }
     let program = a.assemble_with_wrap(wrap_source, wrap_target);
@@ -415,30 +433,48 @@ where
 }
 
 /// The TX state machine
-fn init_sm_tx<P, SMI, PinClk, PinDi>(
+fn init_sm_tx<P, SMI, PinCs, PinClk, PinDi>(
     pio: &mut pio::PIO<P>,
     sm: pio::UninitStateMachine<(P, SMI)>,
+    pin_cs: &PinCs,
     pin_clk: &PinClk,
     pin_di: &PinDi,
 ) -> PioStateMachine<P, SMI>
 where
     P: pio::PIOExt,
     SMI: pio::StateMachineIndex,
+    PinCs: gpio::AnyPin<Function = P::PinFunction>,
     PinClk: gpio::AnyPin<Function = P::PinFunction>,
     PinDi: gpio::AnyPin<Function = P::PinFunction>,
 {
+    let pin_cs = pin_cs.borrow().id().num;
     let pin_clk = pin_clk.borrow().id().num;
     let pin_di = pin_di.borrow().id().num;
 
     let mut a = ::pio::Assembler::<{ ::pio::RP2040_MAX_PROGRAM_SIZE }>::new();
     let mut wrap_source = a.label();
     let mut wrap_target = a.label();
+    let mut bit_loop = a.label();
     {
         use ::pio::*;
         a.bind(&mut wrap_target);
+        // Wait until there is data to transmit
+        a.pull(false, true);
+
+        a.wait(1, WaitSource::GPIO, pin_cs, false);
+        a.wait(0, WaitSource::GPIO, pin_cs, false);
+        a.set(SetDestination::PINDIRS, 1);
+
+        // CPHA=0: first bit comes out before the first clock pulse
         a.out(OutDestination::PINS, 1);
+        a.bind(&mut bit_loop);
         a.wait(0, WaitSource::GPIO, pin_clk, false);
         a.wait(1, WaitSource::GPIO, pin_clk, false);
+        // out must follow wait immediately to meet timing
+        a.out(OutDestination::PINS, 1);
+        a.jmp(JmpCondition::OutputShiftRegisterNotEmpty, &mut bit_loop);
+
+        a.set(SetDestination::PINDIRS, 0);
         a.bind(&mut wrap_source);
     }
     let program = a.assemble_with_wrap(wrap_source, wrap_target);
@@ -446,6 +482,7 @@ where
     let installed = pio.install(&program).unwrap();
     let (sm, rx, tx) = pio::PIOBuilder::from_program(installed)
         .out_pins(pin_di, 1)
+        .set_pins(pin_di, 1)
         .autopull(true)
         .build(sm);
     let sm = sm.start();

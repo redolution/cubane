@@ -143,15 +143,19 @@ mod app {
         let root::LocalResources { exi, payload, .. } = ctx.local;
 
         loop {
-            let cmd = exi.receive_command(&mut pio0, &mut cmd_waker).await;
-            defmt::debug!("{:x}", cmd);
+            let cmd = exi.receive_command(&mut pio0, &mut cmd_waker);
+
+            if cmd == Some((0x800 - 8) << 6) {
+                break;
+            }
         }
 
-        exi.bus_idle(&mut pio0, &mut cs_waker).await;
-        loop {
-            let block = &payload[..256 / 4];
-            exi.respond(&mut pio0, &mut cs_waker, block).await;
+        //defmt::debug!("hello");
+
+        for block in payload.chunks(1024 / 4) {
+            exi.respond(&mut pio0, &mut cs_waker, block);
         }
+        defmt::debug!("done");
     }
 
     #[task(
