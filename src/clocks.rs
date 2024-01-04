@@ -17,7 +17,7 @@ const _: () = assert!(bsp::XOSC_CRYSTAL_FREQ == 12_000_000);
 
 /// Initialize the clock tree according to project requirements
 ///
-/// This is a customized copy of [`clocks::init_clocks_and_plls`].  
+/// This is a customized copy of [`clocks::init_clocks_and_plls`].\
 /// Currently, the only change is that we target a *SYSCLK* rate of 200MHz.
 /// See [`crate::exi`] for an explanation.
 pub(crate) fn init_clocks_and_plls(
